@@ -6,8 +6,15 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+  baseURL: 'https://openrouter.ai/api/v1',
+  apiKey: process.env.OPENROUTER_API_KEY,
+  defaultHeaders: {
+    'HTTP-Referer': 'https://cognify.project.local',
+    'X-Title': 'Cognify',
+  },
 });
+
+console.log('key connected');
 
 export const chat = async (req, res, next) => {
   try {
@@ -17,8 +24,8 @@ export const chat = async (req, res, next) => {
       return res.status(400).json({ message: 'projectId and message are required' });
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ message: 'OpenAI API key not configured' });
+    if (!process.env.OPENROUTER_API_KEY) {
+      return res.status(500).json({ message: 'OpenRouter API key not configured' });
     }
 
     const project = await Project.findById(projectId);
@@ -33,7 +40,7 @@ export const chat = async (req, res, next) => {
 
     // Load last 10 messages for context
     const previousMessages = await Message.find({ projectId })
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .limit(10)
       .select('role content');
 
@@ -48,7 +55,7 @@ export const chat = async (req, res, next) => {
       });
     }
 
-    // Add previous conversation messages
+    // previous conversation messages
     previousMessages.forEach((msg) => {
       messages.push({
         role: msg.role,
@@ -56,7 +63,7 @@ export const chat = async (req, res, next) => {
       });
     });
 
-    // Add current user message
+    // current user message
     messages.push({
       role: 'user',
       content: message
@@ -70,7 +77,7 @@ export const chat = async (req, res, next) => {
     });
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'openai/gpt-4o-mini',
       messages: messages,
       temperature: 0.7
     });
@@ -98,12 +105,16 @@ export const chat = async (req, res, next) => {
 export const getMessages = async (req, res, next) => {
   try {
     const { projectId } = req.params;
-
+    // pagination : 2 params , page no , limit
     if (!projectId) {
       return res.status(400).json({ message: 'projectId is required' });
     }
 
     const project = await Project.findById(projectId);
+    const page = parseInt(req.params.page);
+    const pageLimit = parseInt(req.params.pageLimit);
+
+    const skip = (page - 1) * pageLimit;
 
     if (!project) {
       return res.status(404).json({ message: 'Project not found' });
@@ -116,7 +127,9 @@ export const getMessages = async (req, res, next) => {
     // Retrieve all messages for the project, sorted by creation time
     const messages = await Message.find({ projectId })
       .sort({ createdAt: 1 })
-      .select('role content createdAt');
+      .select('role content createdAt')
+      .limit(pageLimit)
+      .skip(skip);
 
     return res.status(200).json({ messages });
   } catch (err) {
